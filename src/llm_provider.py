@@ -1,15 +1,17 @@
+from typing import Optional, List
+
 import ollama
 
 from config import get_ollama_base_url
 
-_selected_model: str | None = None
+_selected_model: Optional[str] = None
 
 
 def _client() -> ollama.Client:
     return ollama.Client(host=get_ollama_base_url())
 
 
-def list_models() -> list[str]:
+def list_models() -> List[str]:
     """
     Lists all models available on the local Ollama server.
 
@@ -31,7 +33,7 @@ def select_model(model: str) -> None:
     _selected_model = model
 
 
-def get_active_model() -> str | None:
+def get_active_model() -> Optional[str]:
     """
     Returns the currently selected model, or None if none has been selected.
     """

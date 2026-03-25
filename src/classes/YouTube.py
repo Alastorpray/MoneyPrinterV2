@@ -149,7 +149,7 @@ class YouTube:
 
         return completion
 
-    def generate_script(self) -> str:
+    def generate_script(self, max_retries: int = 3) -> str:
         """
         Generate a script for a video, depending on the subject of the video, the number of paragraphs, and the AI model.
 
@@ -170,55 +170,59 @@ class YouTube:
         Get straight to the point, don't start with unnecessary things like, "welcome to this video".
 
         Obviously, the script should be related to the subject of the video.
-        
+
         YOU MUST NOT EXCEED THE {sentence_length} SENTENCES LIMIT. MAKE SURE THE {sentence_length} SENTENCES ARE SHORT.
         YOU MUST NOT INCLUDE ANY TYPE OF MARKDOWN OR FORMATTING IN THE SCRIPT, NEVER USE A TITLE.
         YOU MUST WRITE THE SCRIPT IN THE LANGUAGE SPECIFIED IN [LANGUAGE].
         ONLY RETURN THE RAW CONTENT OF THE SCRIPT. DO NOT INCLUDE "VOICEOVER", "NARRATOR" OR SIMILAR INDICATORS OF WHAT SHOULD BE SPOKEN AT THE BEGINNING OF EACH PARAGRAPH OR LINE. YOU MUST NOT MENTION THE PROMPT, OR ANYTHING ABOUT THE SCRIPT ITSELF. ALSO, NEVER TALK ABOUT THE AMOUNT OF PARAGRAPHS OR LINES. JUST WRITE THE SCRIPT
-        
+
         Subject: {self.subject}
         Language: {self.language}
         """
-        completion = self.generate_response(prompt)
 
-        # Apply regex to remove *
-        completion = re.sub(r"\*", "", completion)
+        for attempt in range(max_retries):
+            completion = self.generate_response(prompt)
+            completion = re.sub(r"\*", "", completion)
 
-        if not completion:
-            error("The generated script is empty.")
-            return
+            if not completion:
+                error("The generated script is empty.")
+                return None
 
-        if len(completion) > 5000:
+            if len(completion) <= 5000:
+                self.script = completion
+                return completion
+
             if get_verbose():
-                warning("Generated Script is too long. Retrying...")
-            return self.generate_script()
+                warning(f"Generated Script is too long ({len(completion)} chars). Retrying ({attempt + 1}/{max_retries})...")
 
-        self.script = completion
+        error("Failed to generate a script within length limits after retries.")
+        return None
 
-        return completion
-
-    def generate_metadata(self) -> dict:
+    def generate_metadata(self, max_retries: int = 3) -> dict:
         """
         Generates Video metadata for the to-be-uploaded YouTube Short (Title, Description).
 
         Returns:
             metadata (dict): The generated metadata.
         """
-        title = self.generate_response(
-            f"Please generate a YouTube Video Title for the following subject, including hashtags: {self.subject}. Only return the title, nothing else. Limit the title under 100 characters."
-        )
-
-        if len(title) > 100:
+        title = None
+        for attempt in range(max_retries):
+            title = self.generate_response(
+                f"Please generate a YouTube Video Title for the following subject, including hashtags: {self.subject}. Only return the title, nothing else. Limit the title under 100 characters."
+            )
+            if len(title) <= 100:
+                break
             if get_verbose():
-                warning("Generated Title is too long. Retrying...")
-            return self.generate_metadata()
+                warning(f"Generated Title is too long ({len(title)} chars). Retrying ({attempt + 1}/{max_retries})...")
+        else:
+            warning("Could not generate a short enough title. Using truncated version.")
+            title = title[:97] + "..."
 
         description = self.generate_response(
             f"Please generate a YouTube Video Description for the following script: {self.script}. Only return the description, nothing else."
         )
 
         self.metadata = {"title": title, "description": description}
-
         return self.metadata
 
     def generate_prompts(self) -> List[str]:
@@ -281,9 +285,8 @@ class YouTube:
                 r = re.compile(r"\[.*\]")
                 image_prompts = r.findall(completion)
                 if len(image_prompts) == 0:
-                    if get_verbose():
-                        warning("Failed to generate Image Prompts. Retrying...")
-                    return self.generate_prompts()
+                    error("Failed to generate Image Prompts after cleanup.")
+                    return []
 
         if len(image_prompts) > n_prompts:
             image_prompts = image_prompts[: int(n_prompts)]
@@ -848,7 +851,8 @@ class YouTube:
             driver.quit()
 
             return True
-        except:
+        except Exception as e:
+            error(f"Upload failed: {e}")
             self.browser.quit()
             return False
 
